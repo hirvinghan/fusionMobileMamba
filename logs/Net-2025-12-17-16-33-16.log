@@ -1,0 +1,25 @@
+INFO train.py(81): 启动分布式训练: World Size=2, Batch Size=4 (per GPU)
+INFO train.py(83): 混合精度训练 (AMP) 已开启 ✅
+INFO train.py(105): 数据集根目录: /home/jicheng/Mamba/FusionMamba-main/dataset
+INFO train.py(192): Epoch: 1/20, Step: 10/2500, Loss: 5.7642, SSIM: 0.3858, ETA: 13:32:35, Time: 9.753s
+INFO train.py(192): Epoch: 1/20, Step: 20/2500, Loss: 3.6643, SSIM: 0.3022, ETA: 11:51:10, Time: 7.322s
+INFO train.py(192): Epoch: 1/20, Step: 30/2500, Loss: 3.6981, SSIM: 0.2756, ETA: 11:34:19, Time: 7.936s
+INFO train.py(192): Epoch: 1/20, Step: 40/2500, Loss: 3.2492, SSIM: 0.2606, ETA: 11:27:38, Time: 8.023s
+INFO train.py(192): Epoch: 1/20, Step: 50/2500, Loss: 2.8282, SSIM: 0.2258, ETA: 11:27:01, Time: 8.229s
+INFO train.py(192): Epoch: 1/20, Step: 60/2500, Loss: 3.2913, SSIM: 0.2513, ETA: 11:26:10, Time: 8.201s
+INFO train.py(192): Epoch: 1/20, Step: 70/2500, Loss: 2.4444, SSIM: 0.1938, ETA: 11:27:48, Time: 8.393s
+INFO train.py(192): Epoch: 1/20, Step: 80/2500, Loss: 2.6561, SSIM: 0.2155, ETA: 11:28:57, Time: 8.388s
+INFO train.py(192): Epoch: 1/20, Step: 90/2500, Loss: 3.0620, SSIM: 0.2432, ETA: 11:29:26, Time: 8.348s
+INFO train.py(192): Epoch: 1/20, Step: 100/2500, Loss: 2.8534, SSIM: 0.2241, ETA: 11:29:48, Time: 8.350s
+INFO train.py(192): Epoch: 1/20, Step: 110/2500, Loss: 2.6290, SSIM: 0.2111, ETA: 11:29:48, Time: 8.313s
+INFO train.py(192): Epoch: 1/20, Step: 120/2500, Loss: 2.6671, SSIM: 0.2176, ETA: 11:30:39, Time: 8.439s
+INFO train.py(192): Epoch: 1/20, Step: 130/2500, Loss: 2.2265, SSIM: 0.1847, ETA: 11:30:59, Time: 8.380s
+INFO train.py(192): Epoch: 1/20, Step: 140/2500, Loss: 2.5128, SSIM: 0.2058, ETA: 11:32:30, Time: 8.593s
+INFO train.py(192): Epoch: 1/20, Step: 150/2500, Loss: 2.9188, SSIM: 0.2259, ETA: 11:32:19, Time: 8.326s
+INFO train.py(192): Epoch: 1/20, Step: 160/2500, Loss: 1.8929, SSIM: 0.1624, ETA: 11:33:40, Time: 8.619s
+INFO train.py(192): Epoch: 1/20, Step: 170/2500, Loss: 2.3090, SSIM: 0.1913, ETA: 11:35:09, Time: 8.686s
+INFO train.py(192): Epoch: 1/20, Step: 180/2500, Loss: 2.3345, SSIM: 0.1949, ETA: 11:37:41, Time: 8.948s
+INFO train.py(192): Epoch: 1/20, Step: 190/2500, Loss: 2.5837, SSIM: 0.2153, ETA: 11:38:08, Time: 8.539s
+INFO train.py(192): Epoch: 1/20, Step: 200/2500, Loss: 2.2502, SSIM: 0.1934, ETA: 11:38:30, Time: 8.532s
+INFO train.py(192): Epoch: 1/20, Step: 210/2500, Loss: 2.4281, SSIM: 0.1951, ETA: 11:42:02, Time: 9.343s
+INFO train.py(192): Epoch: 1/20, Step: 220/2500, Loss: 2.3494, SSIM: 0.1982, ETA: 11:44:01, Time: 9.026s
