@@ -701,7 +701,7 @@ class VSSLayer(nn.Module):
             self.downsample = None
 
     def forward(self, x):
-        # 依次通过每个VSS块
+        # 依次通过每个MobileMambablock块
         for blk in self.blocks:
             if self.use_checkpoint:
                 x = checkpoint.checkpoint(blk, x)
@@ -745,14 +745,13 @@ class VSSLayer_up(nn.Module):
         self.dim = dim
         self.use_checkpoint = use_checkpoint
 
-        # 创建VSS块列表
+        # 创建mobileMamba块列表
         self.blocks = nn.ModuleList([
-            VSSBlock_new(
-                hidden_dim=dim,
+            MobileMambaAdapter(
+                dim=dim,
                 drop_path=drop_path[i] if isinstance(drop_path, list) else drop_path,
-                norm_layer=norm_layer,
-                attn_drop_rate=attn_drop,
                 d_state=d_state,
+                norm_layer=norm_layer
             )
             for i in range(depth)])
 
@@ -803,7 +802,7 @@ class VSSM_Fusion(nn.Module):
         self.embed_dim = dims[0]
         self.num_features = dims[-1]
         self.dims = dims
-        
+
         # 两个独立的补丁嵌入层，分别处理两种模态
         self.patch_embed1 = PatchEmbed2D(patch_size=patch_size, in_chans=in_chans, embed_dim=self.embed_dim,
                                          norm_layer=norm_layer if patch_norm else None)
