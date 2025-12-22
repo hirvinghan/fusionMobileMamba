@@ -31,7 +31,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Distributed Training for FusionMamba')
     parser.add_argument('--model_name', '-M', type=str, default='VSSM_Fusion')
     # 物理Batch Size (单卡)，建议设为 4 或 8
-    parser.add_argument('--batch_size', '-B', type=int, default=4)
+    parser.add_argument('--batch_size', '-B', type=int, default=8)
     parser.add_argument('--epochs', '-E', type=int, default=10)
     parser.add_argument('--num_workers', '-j', type=int, default=8)
     parser.add_argument('--amp', action='store_true', help='Enable Automatic Mixed Precision')
@@ -70,7 +70,7 @@ def train_fusion(args):
     local_rank, rank, world_size = setup_ddp()
     device = torch.device("cuda", local_rank)
     
-    # 只在主进程初始化 Logger
+    # Logger 初始化 (只在 Rank 0)
     logger = None
     if rank == 0:
         logpath = './logs'
@@ -84,8 +84,6 @@ def train_fusion(args):
 
     # 2. 模型初始化
     fusionmodel = eval('VSSM_Fusion')().to(device)
-    
-    # 转换为 DDP 模型
     fusionmodel = DDP(fusionmodel, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)
     fusionmodel.train()
 
@@ -93,22 +91,19 @@ def train_fusion(args):
     scaler = GradScaler(enabled=args.amp)
     criteria_fusion = Fusionloss().to(device)
 
-    # 3. 数据集加载 (自动识别当前目录下的 dataset)
-    # ================= 修改开始 =================
-    # 获取当前脚本所在的绝对路径
+    # 3. 数据集加载 (修复：这里定义 train_loader)
+    # ============================================================
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    # 拼接 dataset 路径
     kaist_root = os.path.join(current_dir, 'dataset') 
     
-    # 在主进程打印确认路径
     if rank == 0:
         logger.info(f"数据集根目录: {kaist_root}")
         if not os.path.exists(kaist_root):
-            logger.error(f"严重错误: 找不到路径 {kaist_root}，请确认文件夹名称是否为 'dataset'")
+            logger.error(f"严重错误: 找不到路径 {kaist_root}")
             return
-    # ================= 修改结束 =================
 
-    # 确保所有进程都检查一遍路径，防止只有主进程能找到
+    # 等待所有进程确认路径存在
+    dist.barrier()
     if not os.path.exists(kaist_root):
         return
 
@@ -125,23 +120,28 @@ def train_fusion(args):
         sampler=train_sampler,
         drop_last=True,
     )
+    # ============================================================
 
     # 4. 训练循环
     st = glob_st = time.time()
     accumulation_steps = 1 
     best_loss = 1000.0
+    
     for epo in range(args.epochs):
-        train_sampler.set_epoch(epo)
+        fusionmodel.train()
+        train_sampler.set_epoch(epo) # 关键：让DDP每个epoch数据不同
         
+        # 学习率调整策略
         lr_start = 0.0001
         lr_decay = 0.75
         lr_this_epo = lr_start * lr_decay ** (epo)
         for param_group in optimizer.param_groups:
             param_group['lr'] = lr_this_epo
 
-        optimizer.zero_grad()
-
+        # === Batch 循环 (Step) ===
         for it, (image_vis, image_ir) in enumerate(train_loader):
+            optimizer.zero_grad() 
+
             image_vis = Variable(image_vis).to(device)
             image_ir = Variable(image_ir).to(device)
 
@@ -153,22 +153,30 @@ def train_fusion(args):
                     image_vis=image_vis, image_ir=image_ir, generate_img=fusion_image,
                     i=epo, labels=None
                 )
-                loss_total = loss_fusion / accumulation_steps
+                loss_total = loss_fusion
+
+            # NaN 防护：如果Loss炸了，跳过这一步，不更新权重
+            if torch.isnan(loss_total) or torch.isinf(loss_total):
+                if rank == 0:
+                    logger.warning(f"⚠️ Warning: NaN detected at Epoch {epo} Step {it}! Skipping...")
+                optimizer.zero_grad()
+                continue
 
             scaler.scale(loss_total).backward()
+            
+            # 梯度裁剪 (防后期崩溃)
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(fusionmodel.parameters(), max_norm=0.1) 
+            
+            scaler.step(optimizer)
+            scaler.update()
 
-            if (it + 1) % accumulation_steps == 0:
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(fusionmodel.parameters(), max_norm=0.1)
-                scaler.step(optimizer)
-                scaler.update()
-                optimizer.zero_grad()
-
+            # 日志打印 (每10步) - 放在这里是对的
             if rank == 0:
                 ed = time.time()
                 t_intv, glob_t_intv = ed - st, ed - glob_st
                 now_it = len(train_loader) * epo + it + 1
-                eta = int((len(train_loader) * args.epochs - now_it) * (glob_t_intv / (now_it)))
+                eta = int((len(train_loader) * args.epochs - now_it) * (glob_t_intv / (now_it + 1e-6)))
                 eta = str(datetime.timedelta(seconds=eta))
                 
                 if now_it % 10 == 0:
@@ -176,9 +184,8 @@ def train_fusion(args):
                         [
                             'Epoch: {epo}/{max_epo}',
                             'Step: {it}/{max_it}',
-                            'Total_loss: {loss:.4f}',
-                            'Fusion_loss: {fusion:.4f}',
-                            'SSIM: {ssim:.4f}',
+                            'Total: {loss:.4f}',
+                            'SSIM_Loss: {ssim:.4f}', # 这里打印的是Loss，越小越好
                             'ETA: {eta}',
                             'Time: {time:.3f}s',
                         ]
@@ -187,25 +194,35 @@ def train_fusion(args):
                         max_epo=args.epochs,
                         it=it + 1,
                         max_it=len(train_loader),
-                        loss=loss_total.item() * accumulation_steps,
-                        fusion=loss_fusion,
+                        loss=loss_total.item(),
                         ssim=ssim_loss.item(),
                         time=t_intv,
                         eta=eta,
                     )
                     logger.info(msg)
                     st = ed
+        # === Batch 循环结束 ===
 
-    if rank == 0:
-        modelpth = os.path.join('model_mobile_mamba', 'my_cross')
-        if not os.path.exists(modelpth):
-            os.makedirs(modelpth)
-        if loss_total < best_loss:
-            best_loss = loss_total
-        fusion_model_file = os.path.join(modelpth, 'fusion_model_best.pth')
-        torch.save(fusionmodel.module.state_dict(), fusion_model_file)
-        logger.info(f"Training Finished! Model saved to {fusion_model_file}")
+        # ==========================================
+        # 保存模型逻辑 (必须在这里，Batch循环之外)
+        # ==========================================
+        if rank == 0:
+            modelpth = os.path.join('model_mobile_mamba', 'my_cross')
+            if not os.path.exists(modelpth):
+                os.makedirs(modelpth)
+            
+            # 1. 保存当前 Epoch (备份)
+            epoch_model_file = os.path.join(modelpth, f'checkpoint_epoch_{epo+1}.pth')
+            torch.save(fusionmodel.module.state_dict(), epoch_model_file)
+            logger.info(f"Checkpoint saved: {epoch_model_file}")
 
+            # 2. 保存最佳模型
+            if loss_total < best_loss:
+                best_loss = loss_total
+                fusion_model_file = os.path.join(modelpth, 'fusion_model_best.pth')
+                torch.save(fusionmodel.module.state_dict(), fusion_model_file)
+                logger.info(f"Best Model updated: {fusion_model_file} (Loss: {best_loss:.4f})")
+    
     cleanup_ddp()
 
 if __name__ == "__main__":

@@ -121,6 +121,7 @@ class SS2D(nn.Module):
             # 每次只取第 i 个方向的数据，此时 A 的形状是 [D, N]，完全符合标准算子要求
             
             # 准备参数
+            
             u_i = u_all[:, i].contiguous()       # [B, D, L]
             dt_i = dt_all[:, i].contiguous()     # [B, D, L]
             B_i = B_all[:, i].contiguous()       # [B, N, L]
@@ -128,6 +129,14 @@ class SS2D(nn.Module):
             A_i = -torch.exp(self.A_logs[i])     # [D, N] (无 Batch 维)
             D_i = self.Ds[i]                     # [D]
             
+            with torch.cuda.amp.autocast(enabled=False):
+            # 将所有输入转为 .float()
+                u_i = u_all[:, i].float()
+                dt_i = dt_all[:, i].float()
+                A_i = -torch.exp(self.A_logs[i]).float() 
+                B_i = B_all[:, i].float()
+                C_i = C_all[:, i].float()
+                D_i = self.Ds[i].float()
             # 调用 CUDA 算子
             y_i = selective_scan_fn(
                 u_i, dt_i, A_i, B_i, C_i, D_i, 

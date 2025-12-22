@@ -16,8 +16,8 @@ def create_wavelet_filter(wave, in_size, out_size, type=torch.float):
                                dec_hi.unsqueeze(0) * dec_hi.unsqueeze(1)], dim=0)
     dec_filters = dec_filters[:, None].repeat(in_size, 1, 1, 1)
     
-    rec_hi = torch.tensor(w.rec_hi[::-1], dtype=type)
-    rec_lo = torch.tensor(w.rec_lo[::-1], dtype=type)
+    rec_hi = torch.tensor(w.rec_hi[::-1], dtype=type).flip(dims=[0])
+    rec_lo = torch.tensor(w.rec_lo[::-1], dtype=type).flip(dims=[0])
     rec_filters = torch.stack([rec_lo.unsqueeze(0) * rec_lo.unsqueeze(1),
                                rec_lo.unsqueeze(0) * rec_hi.unsqueeze(1),
                                rec_hi.unsqueeze(0) * rec_lo.unsqueeze(1),
@@ -57,25 +57,36 @@ class LocalPerception(nn.Module):
 
 class WaveletMambaBranch(nn.Module):
     """
-    长程依赖分支 (Branch 1)
-    对应 MobileMamba 中的 'Global Branch' (Wavelet + Mamba + Attention)
+    长程依赖分支 (Branch 1) - 修改版
+    集成 coif1 小波与动态 Padding 机制，消除网格纹理。
     """
-    def __init__(self, dim, d_state=16, d_conv=3, expand=2):
+    def __init__(self, dim, d_state=16, d_conv=3, expand=2, wave_type='coif1'):
         super().__init__()
         self.dim = dim
+        self.wave_type = wave_type
         
-        # 1. 小波参数
-        self.weight_dec, self.weight_rec = create_wavelet_filter('db1', dim, dim, torch.float)
+        # 1. 小波参数初始化
+        # create_wavelet_filter 会根据 wave_type 返回对应的滤波器权重
+        # coif1 的卷积核大小为 6x6，db1 为 2x2
+        self.weight_dec, self.weight_rec = create_wavelet_filter(wave_type, dim, dim, torch.float)
+        
+        # 注册为 buffer (不参与梯度更新，但随模型保存)
         self.register_buffer('dec_filters', self.weight_dec)
         self.register_buffer('rec_filters', self.weight_rec)
         
+        # === 核心修改：动态计算 Padding ===
+        # 获取卷积核大小 (coif1=6, db2=4, db1=2)
+        self.k_size = self.weight_dec.shape[-1] 
+        # 步长 stride 固定为 2
+        # Padding 公式: (Kernel_Size - Stride) // 2
+        # coif1: (6-2)//2 = 2
+        self.pad = (self.k_size - 2) // 2
+        
         # 2. SS2D (Mamba) 核心
-        # MobileMamba 在低频部分使用 SS2D
         self.vssm_encoder = SS2D(d_model=dim, d_state=d_state, d_conv=d_conv, expand=expand)
         self.norm_ll = nn.LayerNorm(dim)
         
         # 3. 高频注意力 (SE Module)
-        # 高频有 3 个子带 (LH, HL, HH)，通道数是 3 * dim
         self.high_se = nn.Sequential(
             nn.AdaptiveAvgPool2d(1),
             nn.Conv2d(dim * 3, (dim * 3) // 16, 1),
@@ -85,22 +96,30 @@ class WaveletMambaBranch(nn.Module):
         )
 
     def forward(self, x):
-        # 记录原始尺寸，防止奇数丢失
         B, C, H, W = x.shape
         
         # === 1. DWT (下采样) ===
-        x_dwt = F.conv2d(x, self.dec_filters, stride=2, groups=self.dim)
+        # [修改点] 先进行反射填充，避免边缘突变导致的网格
+        # padding 顺序是 (左, 右, 上, 下)
+        if self.pad > 0:
+            x_padded = F.pad(x, (self.pad, self.pad, self.pad, self.pad), mode='reflect')
+        else:
+            x_padded = x
+            
+        # 执行卷积下采样
+        x_dwt = F.conv2d(x_padded, self.dec_filters, stride=2, groups=self.dim)
+        
         # 拆分 Low-Freq (LL) 和 High-Freq (LH, HL, HH)
-        x_dwt = x_dwt.view(B, self.dim, 4, H // 2, W // 2) # 注意：如果是奇数这里会报错，所以后面有插值修复逻辑
+        # 注意：这里 view 的维度假设输入尺寸是偶数。如果是奇数，下面的 interpolate 会兜底。
+        x_dwt = x_dwt.view(B, self.dim, 4, H // 2, W // 2)
         x_ll = x_dwt[:, :, 0, :, :]
         x_high = x_dwt[:, :, 1:, :, :].reshape(B, self.dim * 3, H // 2, W // 2)
         
         # === 2. Process Low-Freq (Mamba) ===
-        # SS2D 需要 BHWC 输入
         x_ll = x_ll.permute(0, 2, 3, 1).contiguous() 
         x_ll = self.norm_ll(x_ll)
         x_ll = self.vssm_encoder(x_ll) 
-        x_ll = x_ll.permute(0, 3, 1, 2).contiguous() # 变回 BCHW
+        x_ll = x_ll.permute(0, 3, 1, 2).contiguous()
         
         # === 3. Process High-Freq (Attention) ===
         attn = self.high_se(x_high)
@@ -111,10 +130,17 @@ class WaveletMambaBranch(nn.Module):
         x_high = x_high.view(B, self.dim, 3, H // 2, W // 2)
         x_rec_in = torch.cat([x_ll, x_high], dim=2).flatten(1, 2)
         
-        x_rec = F.conv_transpose2d(x_rec_in, self.rec_filters, stride=2, groups=self.dim)
+        # [修改点] IDWT 需要减去对应的 Padding 才能恢复原尺寸
+        x_rec = F.conv_transpose2d(
+            x_rec_in, 
+            self.rec_filters, 
+            stride=2, 
+            groups=self.dim, 
+            padding=self.pad # 这里必须设置 padding
+        )
         
         # === 5. 尺寸安全检查 (Robustness) ===
-        # 如果原始输入是奇数，DWT后重构回来会少1个像素，必须插值补全
+        # 处理奇数尺寸输入导致少 1 像素的情况，或者计算误差
         if x_rec.shape[2:] != (H, W):
             x_rec = F.interpolate(x_rec, size=(H, W), mode='bilinear', align_corners=False)
             

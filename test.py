@@ -13,7 +13,7 @@ device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 # 2. 加载模型
 model = net(in_channel=1)
-model_path = "/home/jicheng/Mamba/FusionMamba-main/model_wevelet_last/my_cross/fusion_model_best.pth" 
+model_path = "/home/jicheng/Mamba/FusionMamba_Mobile/model_mobile_mamba/my_cross/fusion_model_best.pth" 
 
 use_gpu = torch.cuda.is_available()
 
@@ -104,8 +104,8 @@ def fusion(input_folder_ir, input_folder_vis, output_folder):
 
 if __name__ == '__main__':
     # 路径配置
-    input_folder_ir = './dataset/TNO/FEL_images/Duine_sequence/thermal'
-    input_folder_vis = './dataset/TNO/FEL_images/Duine_sequence/visual'
-    output_folder = './outputs_TNO_Duine_sequence_wavelet'
+    input_folder_ir = './dataset/RoadScene-master/cropinfrared'
+    input_folder_vis = './dataset/RoadScene-master/crop_LR_visible'
+    output_folder = './outputs_RoadScene_mobilemamba'
 
     fusion(input_folder_ir, input_folder_vis, output_folder)

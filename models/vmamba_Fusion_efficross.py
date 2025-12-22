@@ -47,7 +47,8 @@ class MobileMambaAdapter(nn.Module):
             d_conv=d_conv,
             expand=expand,
             drop_path=drop_path,
-            ratio=0.5 # 默认一半通道给小波
+            ratio_mamba=0.6,
+            ratio_conv=0.3
         )
         # FusionMamba 的输入通常没有 LayerNorm，为了稳定我们在 Adapter 里加一个
         self.norm = norm_layer(dim)
@@ -70,6 +71,46 @@ class MobileMambaAdapter(nn.Module):
         out_original = out.permute(0, 2, 3, 1).contiguous()
 
         return out_original
+class MobileMambaCrossAdapter(nn.Module):
+    """
+    跨模态适配器：专门用于替代 VSSBlock_Cross_new。
+    逻辑：先拼接融合，再过 MobileMambaBlock。
+    Input: x1 (BHWC), x2 (BHWC) -> Output: fused_x (BHWC)
+    """
+    def __init__(self, dim, d_state=16, d_conv=3, expand=2, drop_path=0., norm_layer=nn.LayerNorm):
+        super().__init__()
+        
+        # 1. 特征降维融合层 (2*dim -> dim)
+        # 输入是 BHWC 格式，所以用 Linear 处理 Channel 维度最方便
+        self.fusion_reduce = nn.Linear(dim * 2, dim)
+        
+        # 2. 核心 MobileMamba 模块 (复用之前的 Adapter 即可)
+        self.mobile_mamba = MobileMambaAdapter(
+            dim=dim,
+            d_state=d_state,
+            d_conv=d_conv,
+            expand=expand,
+            drop_path=drop_path,
+            norm_layer=norm_layer
+        )
+        
+        # 3. 激活函数 (可选，用于 Linear 之后)
+        self.act = nn.SiLU()
+
+    def forward(self, x1, x2):
+        # x1, x2: [B, H, W, C]
+        
+        # 1. 拼接 (Concat)
+        x_cat = torch.cat([x1, x2], dim=-1) # [B, H, W, 2C]
+        
+        # 2. 降维融合
+        x_fused = self.fusion_reduce(x_cat) # [B, H, W, C]
+        x_fused = self.act(x_fused)
+        
+        # 3. 输入 MobileMamba 进行增强
+        out = self.mobile_mamba(x_fused)
+        
+        return out
 def flops_selective_scan_ref(B=1, L=256, D=768, N=16, with_D=True, with_Z=False, with_Group=True, with_complex=False):
     """
     计算选择性扫描操作的FLOPs（浮点运算次数）
@@ -238,7 +279,8 @@ class Final_PatchExpand2D(nn.Module):
         # 线性扩展通道数
         self.expand = nn.Linear(self.dim, dim_scale * self.dim, bias=False)
         self.norm = norm_layer(self.dim // dim_scale)
-
+        self.post_conv = nn.Conv2d(self.dim // dim_scale, self.dim // dim_scale, 
+                                   kernel_size=3, stride=1, padding=1,groups=self.dim // dim_scale)
     def forward(self, x):
         B, H, W, C = x.shape
         x = self.expand(x)
@@ -247,7 +289,10 @@ class Final_PatchExpand2D(nn.Module):
         x = rearrange(x, 'b h w (p1 p2 c)-> b (h p1) (w p2) c', p1=self.dim_scale, p2=self.dim_scale,
                       c=C // self.dim_scale)
         x = self.norm(x)
-
+        x = x.permute(0, 3, 1, 2).contiguous()
+        x = F.interpolate(x , scale_factor=self.dim_scale, mode='bilinear', align_corners=False)
+        x = self.post_conv(x)
+        x = x.permute(0, 2, 3, 1).contiguous()
         return x
 
 
@@ -861,11 +906,10 @@ class VSSM_Fusion(nn.Module):
         # 跨模态融合块
         self.Cross_block = nn.ModuleList()
         for cross_layer in range(self.num_layers):  # VSS Block
-            clayer = VSSBlock_Cross_new(
-                hidden_dim=dims[cross_layer],
+            clayer = MobileMambaCrossAdapter(
+                dim=dims[cross_layer],
                 drop_path=drop_rate,
                 norm_layer=norm_layer,
-                attn_drop_rate=attn_drop_rate,
                 d_state=d_state,
             )
             self.Cross_block.append(clayer)
@@ -985,6 +1029,6 @@ class VSSM_Fusion(nn.Module):
         # 上采样处理
         x = self.forward_features_up(x, skip_list)
         # 最终输出 (包含残差连接)
-        x = self.forward_final(x) + x_1 + x_2 + x_1 + x_2
+        x = self.forward_final(x) + x_1 + x_2 #+ x_1 + x_2
 
         return x
