@@ -14,8 +14,8 @@ from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 
 # 导入Mamba SSM的选择性扫描接口
 from mamba_ssm.ops.selective_scan_interface import selective_scan_fn, selective_scan_ref
-from models.cross import VSSBlock_Cross_new
-from models.cross import VSSBlock_new
+#from models.cross import VSSBlock_Cross_new
+#from models.cross import VSSBlock_new
 from .wavelet import MobileMambaBlock
 
 # 尝试导入不同的选择性扫描实现版本
@@ -290,7 +290,6 @@ class Final_PatchExpand2D(nn.Module):
                       c=C // self.dim_scale)
         x = self.norm(x)
         x = x.permute(0, 3, 1, 2).contiguous()
-        x = F.interpolate(x , scale_factor=self.dim_scale, mode='bilinear', align_corners=False)
         x = self.post_conv(x)
         x = x.permute(0, 2, 3, 1).contiguous()
         return x
@@ -719,13 +718,15 @@ class VSSLayer(nn.Module):
         self.dim = dim
         self.use_checkpoint = use_checkpoint
         layer_list = []
-        layer_list.append(
-                    MobileMambaAdapter(
-                    dim=dim,
-                    d_state=d_state,
-                    norm_layer=norm_layer
-                )
-        )
+        for i in range(depth):
+            layer_list.append(
+                        MobileMambaAdapter(
+                        dim=dim,
+                        d_state=d_state,
+                        drop_path=drop_path[i] if isinstance(drop_path, list) else drop_path,
+                        norm_layer=norm_layer
+                    )
+            )
         # 创建VSS块列表
         self.blocks = nn.ModuleList(layer_list)
 
