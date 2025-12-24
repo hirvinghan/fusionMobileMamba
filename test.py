@@ -13,7 +13,7 @@ device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 # 2. 加载模型
 model = net(in_channel=1)
-model_path = "/home/jicheng/Mamba/FusionMamba_Mobile/model_mobile_mamba/my_cross/fusion_model_best.pth" 
+model_path = "/home/jicheng/Mamba/FusionMamba_Mobile/model_mobile_mamba_coif1/my_cross/fusion_model_best.pth" 
 
 use_gpu = torch.cuda.is_available()
 
@@ -106,6 +106,6 @@ if __name__ == '__main__':
     # 路径配置
     input_folder_ir = './dataset/RoadScene-master/cropinfrared'
     input_folder_vis = './dataset/RoadScene-master/crop_LR_visible'
-    output_folder = './outputs_RoadScene_mobilemamba'
+    output_folder = './outputs_RoadScene_mobilemamba_mloss'
 
     fusion(input_folder_ir, input_folder_vis, output_folder)

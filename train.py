@@ -31,7 +31,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Distributed Training for FusionMamba')
     parser.add_argument('--model_name', '-M', type=str, default='VSSM_Fusion')
     # 物理Batch Size (单卡)，建议设为 4 或 8
-    parser.add_argument('--batch_size', '-B', type=int, default=8)
+    parser.add_argument('--batch_size', '-B', type=int, default=32)
     parser.add_argument('--epochs', '-E', type=int, default=10)
     parser.add_argument('--num_workers', '-j', type=int, default=8)
     parser.add_argument('--amp', action='store_true', help='Enable Automatic Mixed Precision')
@@ -124,7 +124,7 @@ def train_fusion(args):
 
     # 4. 训练循环
     st = glob_st = time.time()
-    accumulation_steps = 1 
+
     best_loss = 1000.0
     
     for epo in range(args.epochs):
@@ -207,7 +207,7 @@ def train_fusion(args):
         # 保存模型逻辑 (必须在这里，Batch循环之外)
         # ==========================================
         if rank == 0:
-            modelpth = os.path.join('model_mobile_mamba', 'my_cross')
+            modelpth = os.path.join('model_mobile_mamba_coif1_15101', 'my_cross')
             if not os.path.exists(modelpth):
                 os.makedirs(modelpth)
             

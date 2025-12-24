@@ -12,10 +12,10 @@ os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 # 2. 路径配置 (请修改为你实际的路径)
-model_path = "model_mobile_mamba/my_cross/fusion_model_best.pth"
+model_path = "model_mobile_mamba_coif1/my_cross/fusion_model_best.pth"
 input_folder_ir = './dataset/RoadScene-master/cropinfrared'
 input_folder_vis = './dataset/RoadScene-master/crop_LR_visible'
-output_folder = './outputs_RoadScene_mobilemamba'
+output_folder = './outputs_RoadScene_mobilemamba_mloss'
 
 def load_model(model, model_path):
     print(f"正在加载权重: {model_path}")

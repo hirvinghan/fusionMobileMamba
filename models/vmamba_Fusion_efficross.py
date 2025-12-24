@@ -1022,7 +1022,7 @@ class VSSM_Fusion(nn.Module):
         # 分别提取两种模态的特征
         x1, skip_list1 = self.forward_features_1(x1)
         x2, skip_list2 = self.forward_features_2(x2)
-
+        
         # 特征融合
         x = x1 + x2  # 初始融合
         skip_list = self.Fusion_network(skip_list1, skip_list2)  # 跳跃连接融合
